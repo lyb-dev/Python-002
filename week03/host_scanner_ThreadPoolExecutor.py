@@ -1,4 +1,4 @@
-import sys, getopt, platform, subprocess, socket, json
+import sys, getopt, platform, subprocess, socket, json, time
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -8,8 +8,8 @@ def ping(host):
     return subprocess.call(command) == 0
 
 
-def ping_checking(ips, corePoolSize):
-    with ThreadPoolExecutor(corePoolSize) as executor:
+def ping_checking(ips, workers):
+    with ThreadPoolExecutor(workers) as executor:
         futures = []
         for ip in ips:
             future = executor.submit(ping, ip)
@@ -39,12 +39,13 @@ def socket_con(host, port):
             s.close()
 
 
-def tcp_checking(ips, core_pool_size):
+def tcp_checking(ips, workers):
     result = {}
-    with ThreadPoolExecutor(core_pool_size) as executor:
+    with ThreadPoolExecutor(workers) as executor:
         for ip in ips:
             futures = []
-            ports = list(range(9090, 9093))
+            ports = list(range(1, 1024))
+            # ports = [80]
             for port in ports:
                 future = executor.submit(socket_con, ip, port)
                 futures.append(future)
@@ -57,13 +58,13 @@ def tcp_checking(ips, core_pool_size):
     return result
 
 
-def scan(argv):
+def get_args(argv):
     try:
         print(argv)
         opts, args = getopt.getopt(argv, 'n:f:w:', ['ip='])
     except getopt.GetoptError:
-        print('python host_scanner.py -n 4 -f ping -w result.json --ip 192.168.2.1')
-    print(opts)
+        print('python host_scanner_ThreadPoolExecutor.py -n 4 -f ping -w result.json --ip 192.168.2.1')
+        sys.exit(2)
     params = {}
     for opt, arg in opts:
         if opt == '-n':
@@ -74,19 +75,51 @@ def scan(argv):
             params['file'] = arg
         elif opt == '--ip':
             params['ip'] = arg
-    ip = params.get('ip')
-    ips = str(ip).split('-')
-    core_pool_size = int(params.get('concurrency'))
+    return params
+
+
+def ip_format(ip_segment):
+    ipx = str(ip_segment).split('-')
+
+    ip2num = lambda x: sum([256 ** i * int(j) for i, j in enumerate(x.split('.')[::-1])])
+
+    num2ip = lambda x: '.'.join([str(x // (256 ** i) % 256) for i in range(3, -1, -1)])
+
+    a = [num2ip(i) for i in range(ip2num(ipx[0]), ip2num(ipx[1]) + 1) if not ((i + 1) % 256 == 0 or (i) % 256 == 0)]
+
+    print(a)
+    return a
+
+
+def scan(argv):
+    start_time = time.time()
+    # 获取运行参数
+    params = get_args(argv)
+    mode = params.get('mode')
+    ip_segment = params.get('ip')
+    if '-' in ip_segment:
+        ips = ip_format(ip_segment)
+    else:
+        ips = [ip_segment]
+    workers = int(params.get('concurrency'))
+    file_name = str(params.get('file'))
     json_result = ''
-    if params.get('mode') == 'ping':
-        result = ping_checking(ips, core_pool_size)
+    # 执行扫描
+    if mode == 'ping':
+        result = ping_checking(ips, workers)
         json_result = json.dumps(result)
-    elif params.get('mode') == 'tcp':
-        result = tcp_checking(ips, core_pool_size)
+    elif mode == 'tcp':
+        result = tcp_checking(ips, workers)
         json_result = json.dumps(result)
-    f = open(str(params.get('file')), 'w')
+    # 保存结果
+    f = open(file_name, 'w')
     f.write(json_result)
 
+    cost_time = time.time() - start_time
+    print('-------cost time:' + str(cost_time))
 
-scan(['-n', '4', '-f', 'ping', '-w', 'result.json', '--ip', '192.168.2.16-192.168.2.26'])
-# tcp_checking(['192.168.2.16'], 4)
+
+# scan(['-n', '4', '-f', 'ping', '-w', 'result.json', '--ip', 'www.baidu.com'])
+
+if __name__ == '__main__':
+    scan(sys.argv[1:])
